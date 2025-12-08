@@ -1,1 +1,12 @@
-
+{
+  "1000": {
+    "file": "1000.png",
+    "author": "snowybot测试用户",
+    "source_type": "original"
+  },
+  "1041": {
+    "file": "1041.png",
+    "author": "snowybot测试",
+    "source_type": "trace"
+  }
+}
