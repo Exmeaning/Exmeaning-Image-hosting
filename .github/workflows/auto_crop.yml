@@ -2,13 +2,12 @@ name: Auto Crop Images
 
 on:
   schedule:
-    # 每天 UTC 时间 00:00 运行 (北京时间 08:00)
+    # 每天 UTC 时间 00:00 运行
     - cron: '0 0 * * *'
   workflow_dispatch:
-    # 允许手动点击按钮触发，方便测试
 
 permissions:
-  contents: write # 授予 GITHUB_TOKEN 写权限以便推送更改
+  contents: write
 
 jobs:
   crop-and-push:
@@ -18,40 +17,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # 获取完整的提交历史，有时候对 git 操作更安全，但在大仓库可以用默认值
           fetch-depth: 1 
 
       - name: Install ImageMagick
         run: |
           sudo apt-get update
-          sudo apt-get install -y imagemagick
+          sudo apt-get install -y imagemagick webp
 
       - name: Crop Images
         run: |
           echo "Starting crop process..."
           
-          # 处理 costume_icons 目录
-          if [ -d "costume_icons" ]; then
-            echo "Processing costume_icons..."
-            # 使用 find 配合 xargs 处理，效率更高且支持文件名带空格
-            # -trim: 自动裁剪周围颜色相同的区域（这里指透明背景）
-            # +repage: 重置画布大小，移除裁剪后的偏移量信息
-            find costume_icons -name "*.png" -print0 | xargs -0 -I {} mogrify -trim +repage "{}"
-          else
-            echo "Directory costume_icons not found."
-          fi
+          # 定义一个函数来处理裁剪，避免代码重复
+          # 查找目录下的 png 和 webp 文件，并对其执行裁剪
+          process_dir() {
+            local dir=$1
+            if [ -d "$dir" ]; then
+              echo "Processing $dir..."
+              # 解释: 
+              # -type f: 只查找文件
+              # \( ... \): 组合条件
+              # -o: 逻辑或 (OR)，即名字是 png 或者 webp
+              find "$dir" -type f \( -name "*.png" -o -name "*.webp" \) -print0 | xargs -0 -I {} mogrify -trim +repage "{}"
+            else
+              echo "Directory $dir not found."
+            fi
+          }
 
-          # 处理 base_chibis 目录
-          if [ -d "base_chibis" ]; then
-            echo "Processing base_chibis..."
-            find base_chibis -name "*.png" -print0 | xargs -0 -I {} mogrify -trim +repage "{}"
-          else
-            echo "Directory base_chibis not found."
-          fi
+          # 分别处理两个目录
+          process_dir "costume_icons"
+          process_dir "base_chibis"
 
       - name: Commit and Push changes
         run: |
-          # 配置 git 用户为 github-actions[bot]
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
@@ -59,11 +57,10 @@ jobs:
           if [[ -n $(git status -s) ]]; then
             echo "Changes detected. Committing..."
             
+            # 添加所有变更（包含修改后的 webp 和 png）
             git add costume_icons base_chibis
-            git commit -m "Auto: Crop transparent borders from images"
+            git commit -m "Auto: Crop transparent borders from PNG and WebP images"
             
-            # 使用默认的 GITHUB_TOKEN 推送
-            # 这通常不会触发 rate limit，因为是每日一次的操作
             git push
           else
             echo "No changes detected. Skipping push."
