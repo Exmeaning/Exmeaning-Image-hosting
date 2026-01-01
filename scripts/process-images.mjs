@@ -34,7 +34,7 @@ async function getRecentFiles(dir, hours) {
 }
 
 /**
- * 预处理：将图像转换为模型所需的 Tensor
+ * 预处理：HWC -> CHW 并归一化到 [0, 1]
  */
 async function prepareTensor(imagePath) {
   const { data } = await sharp(imagePath)
@@ -46,7 +46,6 @@ async function prepareTensor(imagePath) {
   const numPixels = MODEL_SIZE * MODEL_SIZE;
   const float32Data = new Float32Array(3 * numPixels);
 
-  // HWC -> CHW 并归一化
   for (let i = 0; i < numPixels; ++i) {
     float32Data[i] = data[i * 3] / 255.0;               // R
     float32Data[i + numPixels] = data[i * 3 + 1] / 255.0;     // G
@@ -74,34 +73,24 @@ async function main() {
       const metadata = await sharp(file.path).metadata();
       const imgTensor = await prepareTensor(file.path);
 
-      // 执行推理
+      // 执行推理，传入 img 键
       const outputs = await model({ img: imgTensor });
       
-      // --- 核心修复：更健壮的输出提取逻辑 ---
-      let maskTensor;
-      if (outputs.output) {
-        maskTensor = outputs.output;
-      } else if (outputs.out) {
-        maskTensor = outputs.out;
-      } else if (outputs[0]) {
-        maskTensor = outputs[0];
-      } else {
-        // 如果 outputs 本身就是 Tensor (某些 transformers.js 版本)
-        maskTensor = outputs;
-      }
+      // 根据你的报错日志，结构是 { mask: Tensor }
+      const maskTensor = outputs.mask || outputs.output || outputs[0];
 
       if (!maskTensor || !maskTensor.data) {
-        throw new Error('无法从模型输出中获取数据，输出结构为: ' + Object.keys(outputs).join(', '));
+        throw new Error('无法定位 mask 数据');
       }
 
       const maskData = maskTensor.data;
-      // -------------------------------------
-
-      // 创建 Mask 灰度图
+      
+      // 创建灰度 Mask Buffer
+      // IS-Net 输出的 dims 可能是 [1, 1, 1024, 1024] 或 [1, 1024, 1024]
       const maskBuffer = Buffer.alloc(MODEL_SIZE * MODEL_SIZE);
       for (let i = 0; i < maskData.length; i++) {
-        // IS-Net 输出通常是 0-1 的概率图
-        maskBuffer[i] = Math.round(Math.max(0, Math.min(1, maskData[i])) * 255);
+        // 模型输出通常是 0-1 的 Float32，转换为 0-255 Uint8
+        maskBuffer[i] = Math.max(0, Math.min(255, Math.round(maskData[i] * 255)));
       }
 
       // 缩放 Mask 到原图尺寸
@@ -111,7 +100,7 @@ async function main() {
       .resize(metadata.width, metadata.height, { fit: 'fill' })
       .toBuffer();
 
-      // 读取原图并合成透明通道
+      // 读取原图并合成
       const { data: rgbData } = await sharp(file.path)
         .ensureAlpha()
         .raw()
@@ -122,19 +111,19 @@ async function main() {
         rgbaData[i * 4] = rgbData[i * 4];
         rgbaData[i * 4 + 1] = rgbData[i * 4 + 1];
         rgbaData[i * 4 + 2] = rgbData[i * 4 + 2];
-        rgbaData[i * 4 + 3] = resizedMask[i]; // A通道
+        rgbaData[i * 4 + 3] = resizedMask[i];
       }
 
       const baseName = path.basename(file.name, path.extname(file.name));
       await sharp(rgbaData, { 
         raw: { width: metadata.width, height: metadata.height, channels: 4 } 
       })
-      .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 15 })
+      .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 10 })
       .resize(MAX_SIZE, MAX_SIZE, { fit: 'inside', withoutEnlargement: true })
       .png()
       .toFile(path.join(OUTPUT_DIR, `${baseName}.png`));
 
-      console.log(`  ✅ 成功`);
+      console.log(`  ✅ 成功: ${baseName}.png`);
     } catch (error) {
       console.error(`  ❌ 失败: ${error.message}`);
     }
