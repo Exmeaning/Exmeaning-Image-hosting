@@ -9,7 +9,7 @@ const ROOT_DIR = path.join(__dirname, '..');
 const INPUT_DIR = path.join(ROOT_DIR, 'costume_origin');
 const OUTPUT_DIR = path.join(ROOT_DIR, 'costume_icons');
 const MAX_SIZE = 512;
-const MODEL_SIZE = 1024; 
+const MODEL_SIZE = 1024;
 
 const HOURS = parseInt(process.env.HOURS || process.argv[2] || '168', 10);
 const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -47,9 +47,9 @@ async function prepareTensor(imagePath) {
   const float32Data = new Float32Array(3 * numPixels);
 
   for (let i = 0; i < numPixels; ++i) {
-    float32Data[i] = data[i * 3] / 255.0;               // R
-    float32Data[i + numPixels] = data[i * 3 + 1] / 255.0;     // G
-    float32Data[i + 2 * numPixels] = data[i * 3 + 2] / 255.0; // B
+    float32Data[i] = (data[i * 3] / 255.0 - 0.5) / 0.5;               // R
+    float32Data[i + numPixels] = (data[i * 3 + 1] / 255.0 - 0.5) / 0.5;     // G
+    float32Data[i + 2 * numPixels] = (data[i * 3 + 2] / 255.0 - 0.5) / 0.5; // B
   }
 
   return new Tensor('float32', float32Data, [1, 3, MODEL_SIZE, MODEL_SIZE]);
@@ -58,7 +58,7 @@ async function prepareTensor(imagePath) {
 async function main() {
   console.log('🚀 开始处理图片');
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
-  
+
   const files = await getRecentFiles(INPUT_DIR, HOURS);
   if (files.length === 0) return console.log('📭 无新文件');
 
@@ -75,7 +75,7 @@ async function main() {
 
       // 执行推理，传入 img 键
       const outputs = await model({ img: imgTensor });
-      
+
       // 根据你的报错日志，结构是 { mask: Tensor }
       const maskTensor = outputs.mask || outputs.output || outputs[0];
 
@@ -84,7 +84,7 @@ async function main() {
       }
 
       const maskData = maskTensor.data;
-      
+
       // 创建灰度 Mask Buffer
       // IS-Net 输出的 dims 可能是 [1, 1, 1024, 1024] 或 [1, 1024, 1024]
       const maskBuffer = Buffer.alloc(MODEL_SIZE * MODEL_SIZE);
@@ -97,15 +97,15 @@ async function main() {
       const resizedMask = await sharp(maskBuffer, {
         raw: { width: MODEL_SIZE, height: MODEL_SIZE, channels: 1 }
       })
-      .resize(metadata.width, metadata.height, { fit: 'fill' })
-      .toBuffer();
+        .resize(metadata.width, metadata.height, { fit: 'fill' })
+        .toBuffer();
 
       // 读取原图并合成
       const { data: rgbData } = await sharp(file.path)
         .ensureAlpha()
         .raw()
         .toBuffer({ resolveWithObject: true });
-      
+
       const rgbaData = Buffer.alloc(metadata.width * metadata.height * 4);
       for (let i = 0; i < metadata.width * metadata.height; i++) {
         rgbaData[i * 4] = rgbData[i * 4];
@@ -115,13 +115,13 @@ async function main() {
       }
 
       const baseName = path.basename(file.name, path.extname(file.name));
-      await sharp(rgbaData, { 
-        raw: { width: metadata.width, height: metadata.height, channels: 4 } 
+      await sharp(rgbaData, {
+        raw: { width: metadata.width, height: metadata.height, channels: 4 }
       })
-      .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 10 })
-      .resize(MAX_SIZE, MAX_SIZE, { fit: 'inside', withoutEnlargement: true })
-      .png()
-      .toFile(path.join(OUTPUT_DIR, `${baseName}.png`));
+        .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 10 })
+        .resize(MAX_SIZE, MAX_SIZE, { fit: 'inside', withoutEnlargement: true })
+        .png()
+        .toFile(path.join(OUTPUT_DIR, `${baseName}.png`));
 
       console.log(`  ✅ 成功: ${baseName}.png`);
     } catch (error) {
