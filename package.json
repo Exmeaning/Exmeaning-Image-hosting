@@ -1,0 +1,13 @@
+{
+  "name": "costume-image-processor",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "process": "node scripts/process-images.mjs",
+    "process:local": "node scripts/process-images.mjs 7"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.0.0",
+    "sharp": "^0.33.0"
+  }
+}
