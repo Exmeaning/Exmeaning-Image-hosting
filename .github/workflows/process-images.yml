@@ -18,25 +18,27 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}  # 明确使用 token
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          node-version: '20'
+          python-version: '3.10'
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          pip install -r requirements.txt
 
       - name: Create output directory
         run: mkdir -p costume_icons
 
       - name: Process images
-        run: node scripts/process-images.mjs
+        run: python scripts/process_images.py
         env:
           HOURS: ${{ github.event.inputs.hours || '168' }}
 
