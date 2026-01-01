@@ -10,17 +10,19 @@ const ROOT_DIR = path.join(__dirname, '..');
 const INPUT_DIR = path.join(ROOT_DIR, 'costume_origin');
 const OUTPUT_DIR = path.join(ROOT_DIR, 'costume_icons');
 const MAX_SIZE = 512;
-const DAYS = parseInt(process.env.DAYS || process.argv[2] || '7', 10);
+
+// 从环境变量或命令行参数获取小时数
+const HOURS = parseInt(process.env.HOURS || process.argv[2] || '168', 10);
 
 // 支持的图片格式
 const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 /**
- * 获取指定天数内修改的文件
+ * 获取指定小时数内修改的文件
  */
-async function getRecentFiles(dir, days) {
+async function getRecentFiles(dir, hours) {
   const files = [];
-  const cutoffTime = Date.now() - days * 24 * 60 * 60 * 1000;
+  const cutoffTime = Date.now() - hours * 60 * 60 * 1000; // 小时转毫秒
 
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -59,21 +61,17 @@ async function getRecentFiles(dir, days) {
 async function removeBackground(imagePath, model, processor) {
   console.log(`  🔄 加载图片...`);
   
-  // 读取原始图片
   const image = await RawImage.read(imagePath);
   const originalWidth = image.width;
   const originalHeight = image.height;
   
   console.log(`  📐 原始尺寸: ${originalWidth}x${originalHeight}`);
   
-  // 处理图片
   const processed = await processor(image);
   
-  // 运行模型获取 mask
   console.log(`  🤖 运行抠图模型...`);
   const output = await model({ input: processed.pixel_values });
   
-  // 获取 mask 数据
   const maskData = output.output[0].data;
   const maskWidth = output.output[0].dims[2];
   const maskHeight = output.output[0].dims[1];
@@ -93,10 +91,8 @@ async function removeBackground(imagePath, model, processor) {
 async function applyMaskAndProcess(imagePath, maskInfo) {
   const { maskData, maskWidth, maskHeight, originalWidth, originalHeight } = maskInfo;
   
-  // 将 mask 转换为图片
   const maskBuffer = Buffer.from(maskData);
   
-  // 将 mask 调整为原始图片大小
   const resizedMask = await sharp(maskBuffer, {
     raw: {
       width: maskWidth,
@@ -108,33 +104,28 @@ async function applyMaskAndProcess(imagePath, maskInfo) {
     .raw()
     .toBuffer();
   
-  // 读取原始图片并转换为 RGBA
   const originalImage = sharp(imagePath);
   const { data: rgbData, info } = await originalImage
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
   
-  // 应用 mask 到 alpha 通道
   const rgbaData = Buffer.alloc(info.width * info.height * 4);
   
   for (let i = 0; i < info.width * info.height; i++) {
-    rgbaData[i * 4] = rgbData[i * 4];         // R
-    rgbaData[i * 4 + 1] = rgbData[i * 4 + 1]; // G
-    rgbaData[i * 4 + 2] = rgbData[i * 4 + 2]; // B
-    rgbaData[i * 4 + 3] = resizedMask[i];     // A (from mask)
+    rgbaData[i * 4] = rgbData[i * 4];
+    rgbaData[i * 4 + 1] = rgbData[i * 4 + 1];
+    rgbaData[i * 4 + 2] = rgbData[i * 4 + 2];
+    rgbaData[i * 4 + 3] = resizedMask[i];
   }
   
-  // 创建带透明度的图片
-  let processedImage = sharp(rgbaData, {
+  return sharp(rgbaData, {
     raw: {
       width: info.width,
       height: info.height,
       channels: 4
     }
   });
-  
-  return processedImage;
 }
 
 /**
@@ -143,7 +134,6 @@ async function applyMaskAndProcess(imagePath, maskInfo) {
 async function trimAndResize(image) {
   console.log(`  ✂️ 裁剪透明边缘...`);
   
-  // 裁剪透明边缘
   const trimmed = await image
     .trim({
       background: { r: 0, g: 0, b: 0, alpha: 0 },
@@ -156,7 +146,6 @@ async function trimAndResize(image) {
   
   console.log(`  📐 裁剪后尺寸: ${width}x${height}`);
   
-  // 如果尺寸超过 MAX_SIZE，进行缩放
   if (width > MAX_SIZE || height > MAX_SIZE) {
     console.log(`  📏 缩放到最大 ${MAX_SIZE}px...`);
     finalImage = finalImage.resize(MAX_SIZE, MAX_SIZE, {
@@ -178,17 +167,13 @@ async function processImage(file, model, processor) {
   console.log(`\n📷 处理: ${file.name}`);
   
   try {
-    // 抠图
     const maskInfo = await removeBackground(file.path, model, processor);
     
-    // 应用 mask
     console.log(`  🎭 应用遮罩...`);
     const maskedImage = await applyMaskAndProcess(file.path, maskInfo);
     
-    // 裁剪和调整大小
     const finalImage = await trimAndResize(maskedImage);
     
-    // 保存为 PNG
     await finalImage.png().toFile(outputPath);
     
     console.log(`  ✅ 已保存: ${outputPath}`);
@@ -200,19 +185,32 @@ async function processImage(file, model, processor) {
 }
 
 /**
+ * 格式化时间显示
+ */
+function formatHours(hours) {
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    if (remainingHours === 0) {
+      return `${days} 天`;
+    }
+    return `${days} 天 ${remainingHours} 小时`;
+  }
+  return `${hours} 小时`;
+}
+
+/**
  * 主函数
  */
 async function main() {
   console.log('🚀 开始处理图片');
-  console.log(`📅 处理 ${DAYS} 天内的文件`);
+  console.log(`📅 处理 ${formatHours(HOURS)} 内的文件`);
   console.log(`📂 输入目录: ${INPUT_DIR}`);
   console.log(`📂 输出目录: ${OUTPUT_DIR}`);
   
-  // 确保输出目录存在
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
   
-  // 获取需要处理的文件
-  const files = await getRecentFiles(INPUT_DIR, DAYS);
+  const files = await getRecentFiles(INPUT_DIR, HOURS);
   
   if (files.length === 0) {
     console.log('\n📭 没有找到需要处理的文件');
@@ -220,9 +218,8 @@ async function main() {
   }
   
   console.log(`\n📋 找到 ${files.length} 个文件待处理:`);
-  files.forEach(f => console.log(`   - ${f.name} (修改于: ${f.mtime.toLocaleDateString()})`));
+  files.forEach(f => console.log(`   - ${f.name} (修改于: ${f.mtime.toLocaleString()})`));
   
-  // 加载模型（只加载一次）
   console.log('\n🤖 加载 AI 模型...');
   const processor = await AutoProcessor.from_pretrained('BritishWerewolf/IS-Net-Anime');
   const model = await AutoModel.from_pretrained('BritishWerewolf/IS-Net-Anime', {
@@ -230,7 +227,6 @@ async function main() {
   });
   console.log('✅ 模型加载完成');
   
-  // 处理每个文件
   let successCount = 0;
   let failCount = 0;
   
@@ -243,7 +239,6 @@ async function main() {
     }
   }
   
-  // 输出统计
   console.log('\n📊 处理完成:');
   console.log(`   ✅ 成功: ${successCount}`);
   console.log(`   ❌ 失败: ${failCount}`);
