@@ -7,7 +7,11 @@ on:
       hours:
         description: '处理多少小时内的图片'
         required: false
-        default: '168'  # 默认7天 = 168小时
+        default: '168'
+
+# 添加权限设置
+permissions:
+  contents: write
 
 jobs:
   process-images:
@@ -18,15 +22,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}  # 明确使用 token
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # 移除 cache 选项
 
       - name: Install dependencies
-        run: npm install  # 改用 npm install
+        run: npm install
 
       - name: Create output directory
         run: mkdir -p costume_icons
