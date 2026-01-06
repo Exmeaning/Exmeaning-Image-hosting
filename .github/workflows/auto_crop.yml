@@ -1,7 +1,5 @@
 name: Auto Crop Images
 
-on:
-  workflow_dispatch:
 
 permissions:
   contents: write
